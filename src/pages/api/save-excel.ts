@@ -1,37 +1,24 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import fs from 'fs';
-import path from 'path';
+import express from 'express';
+import multer from 'multer';
+import * as XLSX from 'xlsx';
 
-export const config = {
-    api: {
-        bodyParser: {
-            sizeLimit: '10mb',
-        },
-    },
-};
+const router = express.Router();
+const upload = multer({ dest: 'uploads/' });
 
-export default async function handler(
-    req: NextApiRequest,
-    res: NextApiResponse
-) {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ message: 'Method not allowed' });
+router.post('/save-excel', upload.single('file'), (req, res) => {
+  try {
+    // Your Excel processing logic here
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
     }
+    
+    const workbook = XLSX.readFile(req.file.path);
+    // Process your Excel file
+    
+    res.status(200).json({ message: 'File processed successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error processing file' });
+  }
+});
 
-    try {
-        const { data } = req.body;
-        if (!data) {
-            return res.status(400).json({ message: 'No data provided' });
-        }
-
-        const buffer = Buffer.from(data);
-        const filePath = path.join(process.cwd(), 'public', 'data', 'crm-data.xlsx');
-        
-        fs.writeFileSync(filePath, buffer);
-        
-        res.status(200).json({ message: 'File updated successfully' });
-    } catch (error) {
-        console.error('Error saving file:', error);
-        res.status(500).json({ message: 'Error saving file' });
-    }
-}
+export default router;
