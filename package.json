@@ -34,10 +34,10 @@
     "xlsx": "^0.18.5"
   },
   "scripts": {
-    "start": "concurrently \"set PORT=3005 && react-scripts start\" \"ts-node --esm src/server/server.ts\"",
-    "start:client": "set PORT=3005 && react-scripts start",
+    "start": "concurrently \"set PORT=3005 && vite\" \"ts-node --esm src/server/server.ts\"",
+    "start:client": "set PORT=3005 && vite",
     "start:server": "ts-node --esm src/server/server.ts",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "eslintConfig": {
