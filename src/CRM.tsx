@@ -270,17 +270,24 @@ export default function CRMManager(): JSX.Element{
   // Update handlers to persist changes
   const handleSave = async (updatedEntry: CRMEntry) => {
     try {
+      const newData = isCreatingNew
+        ? [...crmData, { ...updatedEntry, id: `new-${Date.now()}` }]
+        : crmData.map(entry => entry.id === updatedEntry.id ? updatedEntry : entry);
+  
+      setCrmData(newData);
+      localStorage.setItem('crmData', JSON.stringify(newData));
+      
+      // Update crmNames with the new entry if it's a new standard
       if (isCreatingNew) {
-        const newEntry = await createCrmEntry(updatedEntry);
-        setCrmData([...crmData, newEntry]);
-      } else {
-        const updated = await updateCrmEntry(updatedEntry.id, updatedEntry);
-        setCrmData(crmData.map(entry => entry.id === updated.id ? updated : entry));
+        const uniqueNames = [...new Set([...crmNames, updatedEntry.name])];
+        setCrmNames(uniqueNames);
       }
+      
       setEditingEntry(null);
       setIsCreatingNew(false);
     } catch (error) {
       console.error('Error saving entry:', error);
+      alert('Failed to save the entry. Please try again.');
     }
   };
 
@@ -995,7 +1002,25 @@ function EditForm({
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    onSave(formData);
+    
+    // Validate required fields
+    const requiredFields = ['name', 'labCode', 'expiryDate', 'section'] as const;
+    const missingFields = requiredFields.filter(field => !formData[field]);
+    
+    if (missingFields.length > 0) {
+      alert(`Please fill in all required fields: ${missingFields.join(', ')}`);
+      return;
+    }
+  
+    // Create new entry with all required fields
+    const newEntry = {
+      ...formData,
+      status: 'active' as const,
+      orderPlaced: false,
+      notRequired: false
+    };
+  
+    onSave(newEntry);
   };
 
   
@@ -1205,11 +1230,11 @@ function EditForm({
             required
           />
         </div>
-        <div className="col-span-2 flex justify-end space-x-2">
-          <Button variant="outline" type="button" onClick={onCancel}>
+        <div className="col-span-2 flex justify-end gap-2">
+          <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit">
+          <Button type="submit" variant="default">
             {isCreatingNew ? 'Create' : 'Save'}
           </Button>
         </div>
