@@ -13,6 +13,35 @@ import { Checkbox } from "./components/ui/checkbox";
 import * as XLSX from 'xlsx';
 import { Login } from './components/Login';
 
+const API_URL = 'http://localhost:5000/api';
+
+const fetchCrmData = async () => {
+  const response = await fetch(`${API_URL}/crm`);
+  return response.json();
+};
+
+const createCrmEntry = async (entry: CRMEntry) => {
+  const response = await fetch(`${API_URL}/crm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry)
+  });
+  return response.json();
+};
+
+const updateCrmEntry = async (id: string, entry: CRMEntry) => {
+  const response = await fetch(`${API_URL}/crm/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry)
+  });
+  return response.json();
+};
+
+const deleteCrmEntry = async (id: string) => {
+  await fetch(`${API_URL}/crm/${id}`, { method: 'DELETE' });
+};
+
 interface CRMEntry {
   id: string;
   labCode: string;
@@ -81,10 +110,16 @@ export default function CRMManager(): JSX.Element{
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const authStatus = localStorage.getItem('isAuthenticated');
-    if (authStatus === 'true') {
-      setIsAuthenticated(true);
-    }
+    const loadData = async () => {
+      try {
+        const data = await fetchCrmData();
+        setCrmData(data);
+        setCrmNames(data.map((item: CRMEntry) => item.name));
+      } catch (error) {
+        console.error('Error loading CRM data:', error);
+      }
+    };
+    loadData();
   }, []);
 
   useEffect(() => {
@@ -233,39 +268,29 @@ export default function CRMManager(): JSX.Element{
     );
   };
   // Update handlers to persist changes
-  const handleSave = (updatedEntry: CRMEntry) => {
-    if (isCreatingNew) {
-      const savedData = localStorage.getItem('crmData');
-      if (savedData) {
-        const data: CRMEntry[] = JSON.parse(savedData);
-        const exactMatch = data.some(entry => 
-          entry.labCode.toLowerCase().replace(/\s+/g, '') === 
-          updatedEntry.labCode.toLowerCase().replace(/\s+/g, '')
-        );
-        
-        if (exactMatch) {
-          alert('This Lab Code is already in use. Please use a unique code.');
-          return;
-        }
+  const handleSave = async (updatedEntry: CRMEntry) => {
+    try {
+      if (isCreatingNew) {
+        const newEntry = await createCrmEntry(updatedEntry);
+        setCrmData([...crmData, newEntry]);
+      } else {
+        const updated = await updateCrmEntry(updatedEntry.id, updatedEntry);
+        setCrmData(crmData.map(entry => entry.id === updated.id ? updated : entry));
       }
-      const newData = [...crmData, updatedEntry];
-      setCrmData(newData);
-      localStorage.setItem('crmData', JSON.stringify(newData));
-    } else {
-      const newData = crmData.map((entry) =>
-        entry.id === updatedEntry.id ? updatedEntry : entry
-      );
-      setCrmData(newData);
-      localStorage.setItem('crmData', JSON.stringify(newData));
+      setEditingEntry(null);
+      setIsCreatingNew(false);
+    } catch (error) {
+      console.error('Error saving entry:', error);
     }
-    setEditingEntry(null);
-    setIsCreatingNew(false);
   };
 
-  const handleDelete = (id: string) => {
-    const newData = crmData.filter((entry) => entry.id !== id);
-    setCrmData(newData);
-    localStorage.setItem('crmData', JSON.stringify(newData));
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteCrmEntry(id);
+      setCrmData(crmData.filter(entry => entry.id !== id));
+    } catch (error) {
+      console.error('Error deleting entry:', error);
+    }
   };
 
   const handleMarkConsumed = (id: string) => {
@@ -935,11 +960,29 @@ function EditForm({
   setSelectedCrm,
 }: EditFormProps): React.JSX.Element {
   const [formData, setFormData] = useState<CRMEntry>(entry);
+  const [isNewStandard, setIsNewStandard] = useState(false);
   const sections = ['HPLC', 'GCMS', 'GC', 'ICP', 'LCMSMS'];
 
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const newName = e.target.value;
     setFormData(prev => ({ ...prev, name: newName }));
+    setIsNewStandard(e.target.value === 'new');
+
+    // Auto-fill CAS No if selecting existing standard
+    if (newName !== 'new') {
+      const savedData = localStorage.getItem('crmData');
+      if (savedData) {
+        const data: CRMEntry[] = JSON.parse(savedData);
+        const matchingEntry = data.find(entry => entry.name === newName);
+        if (matchingEntry) {
+          setFormData(prev => ({
+            ...prev,
+            name: newName,
+            casNo: matchingEntry.casNo
+          }));
+        }
+      }
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -963,13 +1006,37 @@ function EditForm({
       </h2>
       <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Name of the Standard</label>
-          <Input
-            name="name"
-            value={formData.name}
-            onChange={handleNameChange}
-            required
-          />
+        <label className="block text-sm font-medium mb-1">Name of the Standard</label>
+          <div className="space-y-2">
+            <select
+              name="name"
+              value={isNewStandard ? 'new' : formData.name}
+              onChange={handleNameChange}
+              className="w-full p-2 border border-gray-200 rounded-md"
+              required
+            >
+              <option value="">Select Standard</option>
+              {crmNames
+                .filter((name, index, self) => self.indexOf(name) === index)
+                .sort()
+                .map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+              ))}
+              <option value="new">+ Add New Standard</option>
+            </select>
+
+            {isNewStandard && (
+              <Input
+                name="newName"
+                placeholder="Enter new standard name"
+                value={formData.name}
+                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                required
+              />
+            )}
+          </div>
         </div>
         <div>
         <label className="block text-sm font-medium mb-1">Lab Code</label>

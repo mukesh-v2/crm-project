@@ -1,43 +1,54 @@
 import express from 'express';
-import multer from 'multer';
-import path from 'path';
 import cors from 'cors';
+import connectDB from './db';
+import CrmEntry from './models/CrmEntry';
 
 const app = express();
-const port = 3005;
-
-// Enable CORS
 app.use(cors());
-
-// Parse JSON bodies
 app.use(express.json());
 
-// Serve static files
-app.use(express.static(path.join(__dirname, '../../public')));
+connectDB();
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, path.join(__dirname, '../../public/data'));
-    },
-    filename: (req, file, cb) => {
-        cb(null, 'crm-data.xlsx');
-    }
+// Get all CRM entries
+app.get('/api/crm', async (req, res) => {
+  try {
+    const entries = await CrmEntry.find();
+    res.json(entries);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-const upload = multer({ storage });
-
-app.post('/api/save-excel', upload.single('file'), (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ message: 'No file uploaded' });
-        }
-        res.json({ message: 'File saved successfully' });
-    } catch (error) {
-        console.error('Error saving file:', error);
-        res.status(500).json({ message: 'Error saving file' });
-    }
+// Create new CRM entry
+app.post('/api/crm', async (req, res) => {
+  try {
+    const entry = new CrmEntry(req.body);
+    await entry.save();
+    res.json(entry);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-app.listen(port, '0.0.0.0', () => {
-    console.log(`Server running on port ${port}`);
+// Update CRM entry
+app.put('/api/crm/:id', async (req, res) => {
+  try {
+    const entry = await CrmEntry.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(entry);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
+
+// Delete CRM entry
+app.delete('/api/crm/:id', async (req, res) => {
+  try {
+    await CrmEntry.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Entry deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
