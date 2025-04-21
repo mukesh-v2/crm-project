@@ -137,16 +137,18 @@ app.post('/api/crm', async (req, res) => {
 
 app.put('/api/crm/:id/status', async (req, res) => {
   try {
+    const { id } = req.params;
     const { status } = req.body;
     
     // Validate status
-    if (!status || !['active', 'expired', 'ordered'].includes(status)) {
+    const validStatuses = ['active', 'consumed'];
+    if (!validStatuses.includes(status)) {
       return res.status(400).json({ message: 'Invalid status value' });
     }
 
     const updatedCrm = await CRM.findByIdAndUpdate(
-      req.params.id,
-      { status: status },
+      id,
+      { $set: { status } },
       { new: true }
     );
 
@@ -157,7 +159,7 @@ app.put('/api/crm/:id/status', async (req, res) => {
     res.json(updatedCrm);
   } catch (error) {
     console.error('Status update error:', error);
-    res.status(400).json({ message: error.message });
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 

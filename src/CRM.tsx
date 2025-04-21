@@ -376,12 +376,7 @@ export default function CRM(): JSX.Element {
   
   const handleMarkConsumed = async (id: string) => {
     try {
-      const entry = crmData.find(e => e.id === id);
-      if (!entry) {
-        throw new Error('Entry not found');
-      }
-  
-      // Use the specific status endpoint
+      console.log('Marking as consumed:', id);
       const response = await fetch(`${API_URL}/crm/${id}/status`, {
         method: 'PUT',
         headers: {
@@ -391,13 +386,15 @@ export default function CRM(): JSX.Element {
       });
   
       if (!response.ok) {
-        throw new Error('Failed to update status');
+        const errorData = await response.json();
+        console.error('Error data:', errorData);
+        throw new Error(errorData.message || `Failed to update status (${response.status})`);
       }
   
-      const savedEntry = await response.json();
+      // Update local state directly instead of waiting for response
       setCrmData(prevData => 
         prevData.map(item => 
-          item.id === id ? savedEntry : item
+          item.id === id ? { ...item, status: 'consumed' } : item
         )
       );
     } catch (error) {
