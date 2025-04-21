@@ -1,48 +1,19 @@
+require('dotenv').config({ path: __dirname + '/.env' });
 const express = require('express');
 const cors = require('cors');
-const mongoose = require('mongoose');
+const { connect } = require('couchbase');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const path = require('path');
-require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 5000;
-app.get('/api', (req, res) => {
-  res.json({
-    message: 'Welcome to the CRM API',
-    endpoints: {
-      getAllCRMs: '/api/crm',
-      createCRM: '/api/crm (POST)',
-      updateCRM: '/api/crm/:id (PUT)',
-      deleteCRM: '/api/crm/:id (DELETE)',
-      bulkUpload: '/api/crm/bulk (POST)',
-      uploadExcel: '/api/crm/upload-excel (POST)'
-    }
-  });
-});
-app.use(cors());
-app.use(express.json());
 
-// Single MongoDB connection using mongoose
-mongoose.connect(process.env.MONGODB_URI, {
-  serverApi: {
-    version: '1',
-    strict: true,
-    deprecationErrors: true,
-  }
-})
-.then(() => {
-  console.log("Successfully connected to MongoDB Atlas!");
-  return loadInitialData();
-})
-.then(() => {
-  console.log('Initial data load complete');
-})
-.catch((error) => {
-  console.error("Connection to MongoDB failed:", error);
-  process.exit(1);
-});
+// Couchbase connection configuration
+const connectionString = 'couchbases://cb.ikgtzjgatttqqvi.cloud.couchbase.com';
+const username = 'EnvirocareLabs25';
+const password = 'Envirocare@2025';
+const bucketName = 'crm-db';
 
 
 function excelDateToString(serial) {
@@ -78,58 +49,67 @@ function excelDateToString(serial) {
   }
 
 // CRM Schema
-const crmSchema = new mongoose.Schema({
-  labCode: { 
-    type: String, 
-    required: true 
-  },
-  name: String,
-  expiryDate: String,
-  make: String,
-  quantity: String,
-  purity: String,
-  productCode: String,
-  casNo: String,
-  section: String,
-  location: String,
-  boxNo: String,
-  remarks: String,
-  status: String,
-  orderPlaced: Boolean,
-  notRequired: Boolean
-});
+let cluster;
+let bucket;
+let collection;
 
-crmSchema.pre('save', function(next) {
-    this.labCode = this.labCode.trim().toUpperCase();
-    next();
-  });
-crmSchema . index ( { labCode: 1 } , { unique: true } ) ;
-const CRM = mongoose.model('CRM', crmSchema);
+async function initializeCouchbase() {
+  try {
+    cluster = await connect(connectionString, {
+      username: username,
+      password: password,
+      bucketName: bucketName
+    });
+    
+    bucket = cluster.bucket(bucketName);
+    collection = bucket.defaultCollection();
+    
+    // Create primary index if it doesn't exist
+    const queryResult = await cluster.query(
+      'CREATE PRIMARY INDEX ON `crm-db` IF NOT EXISTS'
+    );
+    
+    console.log('Successfully connected to Couchbase!');
+    return loadInitialData();
+  } catch (error) {
+    console.error('Couchbase connection failed:', error);
+    process.exit(1);
+  }
+}
 
 // Routes
-// Add a test route for the root path
+app.use(cors());
+app.use(express.json());
+
 app.get('/', (req, res) => {
   res.json({ message: 'CRM API Server is running' });
 });
 
 app.get('/api/crm', async (req, res) => {
-    try {
-      const crms = await CRM.find();
-      const updatedCrms = crms.map(crm => ({
-        ...crm.toObject(),
-        status: isExpired(crm.expiryDate) ? 'expired' : crm.status
-      }));
-      res.json(updatedCrms);
-    } catch (error) {
-      res.status(500).json({ message: error.message });
-    }
-  });
+  try {
+    const query = 'SELECT * FROM `crm-db`';
+    const result = await cluster.query(query);
+    const crms = result.rows.map(crm => ({
+      ...crm,
+      status: isExpired(crm.expiryDate) ? 'expired' : crm.status
+    }));
+    res.json(crms);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
 
 app.post('/api/crm', async (req, res) => {
   try {
-    const crm = new CRM(req.body);
-    const savedCrm = await crm.save();
-    res.status(201).json(savedCrm);
+    const id = `crm::${req.body.labCode}`;
+    const document = {
+      ...req.body,
+      type: 'crm',
+      createdAt: new Date().toISOString()
+    };
+    
+    await collection.insert(id, document);
+    res.status(201).json({ id, ...document });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -139,107 +119,79 @@ app.put('/api/crm/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    
-    // Validate status
-    const validStatuses = ['active', 'consumed'];
-    if (!validStatuses.includes(status)) {
+
+    if (!['active', 'consumed', 'expired'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status value' });
     }
 
-    const updatedCrm = await CRM.findByIdAndUpdate(
-      id,
-      { $set: { status } },
-      { new: true }
-    );
+    const result = await collection.get(`crm::${id}`);
+    const updatedDoc = {
+      ...result.content,
+      status: status
+    };
 
-    if (!updatedCrm) {
-      return res.status(404).json({ message: 'CRM not found' });
-    }
-
-    res.json(updatedCrm);
+    await collection.replace(`crm::${id}`, updatedDoc);
+    res.json(updatedDoc);
   } catch (error) {
     console.error('Status update error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ message: 'Internal server error', error: error.message });
   }
 });
 
 app.put('/api/crm/:id', async (req, res) => {
   try {
-    const updates = { ...req.body };
-    delete updates._id; // Remove _id if present
+    const { id } = req.params;
+    const result = await collection.get(`crm::${id}`);
+    const updatedDoc = {
+      ...result.content,
+      ...req.body,
+      updatedAt: new Date().toISOString()
+    };
 
-    const updatedCrm = await CRM.findByIdAndUpdate(
-      req.params.id,
-      updates,
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedCrm) {
-      return res.status(404).json({ message: 'CRM not found' });
-    }
-
-    res.json(updatedCrm);
+    await collection.replace(`crm::${id}`, updatedDoc);
+    res.json(updatedDoc);
   } catch (error) {
-    console.error('Update error:', error);
     res.status(400).json({ message: error.message });
   }
 });
 
 app.delete('/api/crm/:id', async (req, res) => {
   try {
-    await CRM.findByIdAndDelete(req.params.id);
+    await collection.remove(`crm::${req.params.id}`);
     res.json({ message: 'CRM deleted' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-// Add this after your existing routes
+// Bulk operations
 app.post('/api/crm/bulk', async (req, res) => {
   try {
     const entries = req.body;
-    console.log('Received entries:', entries.length);
-    
-    // Validate that we received data
     if (!Array.isArray(entries) || entries.length === 0) {
-      console.log('Invalid or empty data received');
       return res.status(400).json({ message: 'Invalid data format or empty array' });
     }
 
-    // Log first entry as sample
-    console.log('Sample entry:', entries[0]);
+    const operations = entries.map(entry => ({
+      id: `crm::${entry.labCode}`,
+      document: {
+        ...entry,
+        type: 'crm',
+        createdAt: new Date().toISOString()
+      }
+    }));
 
-    // Try to insert the data
-    const savedEntries = await CRM.insertMany(entries, { ordered: false });
-    console.log('Successfully saved entries:', savedEntries.length);
-    res.status(201).json(savedEntries);
+    const results = await Promise.all(
+      operations.map(op => collection.insert(op.id, op.document))
+    );
+
+    res.status(201).json(results);
   } catch (error) {
-    console.error('Bulk insert error:', error);
-    res.status(400).json({ 
-      message: error.message,
-      code: error.code,
-      details: error.writeErrors || error.errors 
-    });
+    res.status(400).json({ message: error.message });
   }
 });
 
-
-
-// Add this function after your mongoose connection but before routes
-
-
-// Modify your mongoose connection to include loadInitialData
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log('Connected to MongoDB Atlas');
-    return loadInitialData();
-  })
-  .then(() => {
-    console.log('Initial data load complete');
-  })
-  .catch(err => console.error('MongoDB Atlas connection error:', err));
-
-// Configure multer for file upload
+// Excel upload configuration and route
 const storage = multer.diskStorage({
   destination: './uploads/',
   filename: (req, file, cb) => {
@@ -249,7 +201,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Add new route for Excel upload
 app.post('/api/crm/upload-excel', upload.single('file'), async (req, res) => {
   try {
     const workbook = XLSX.readFile('./uploads/CRM_data.xlsx');
@@ -257,8 +208,8 @@ app.post('/api/crm/upload-excel', upload.single('file'), async (req, res) => {
     const worksheet = workbook.Sheets[sheetName];
     const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-    const formattedData = jsonData.map((row, index) => ({
-      labCode: String(row['Lab Code'] || '').trim(),
+    const formattedData = jsonData.map(row => ({
+      labCode: String(row['Lab Code'] || '').trim().toUpperCase(),
       name: String(row['Name'] || ''),
       expiryDate: String(row['Expiry Date'] || ''),
       make: String(row['Make'] || ''),
@@ -271,68 +222,32 @@ app.post('/api/crm/upload-excel', upload.single('file'), async (req, res) => {
       boxNo: String(row['Box No'] || ''),
       remarks: String(row['Remarks'] || ''),
       status: 'active',
-      orderPlaced: false
+      orderPlaced: false,
+      type: 'crm',
+      createdAt: new Date().toISOString()
     }));
 
-    const savedEntries = await CRM.insertMany(formattedData);
-    res.json(savedEntries);
+    const operations = formattedData.map(doc => ({
+      id: `crm::${doc.labCode}`,
+      document: doc
+    }));
+
+    await Promise.all(
+      operations.map(op => collection.insert(op.id, op.document))
+    );
+
+    res.json({ message: 'Excel data imported successfully' });
   } catch (error) {
-    console.error('Excel upload error:', error);
     res.status(400).json({ message: error.message });
   }
 });
-async function loadInitialData() {
-    try {
-      // Check if database is empty
-      const count = await CRM.countDocuments();
-      console.log('Current document count:', count);
-      
-      if (count === 0) {
-        console.log('Database is empty, loading initial data...');
-        const excelPath = path.join(__dirname, 'uploads', 'CRM_data.xlsx');
-        console.log('Reading Excel file from:', excelPath);
-        
-        const workbook = XLSX.readFile(excelPath);
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
-        
-        console.log('Excel data parsed, row count:', jsonData.length);
-        console.log('Sample first row:', jsonData[0]);
-  
-        // Format data
-        const formattedData = jsonData.map(row => {
-            const expiryDateStr = excelDateToString(row['Expiry date']);
-            
-            return {
-              labCode: String(row['Lab Code'] || '').trim().toUpperCase(),
-              name: String(row['Name'] || ''),
-              expiryDate: expiryDateStr,
-              make: String(row['Make'] || ''),
-              quantity: String(row['Quantity'] || ''),
-              purity: String(row['Purity '] || ''),
-              productCode: String(row['Product Code'] || ''),
-              casNo: String(row['CAS no.'] || ''),
-              section: String(row['Section'] || ''),
-              location: String(row['Location'] || ''),
-              boxNo: String(row['Box No.'] || ''),
-              remarks: String(row['Remarks'] || ''),
-              status: isExpired(expiryDateStr) ? 'expired' : 'active',
-              orderPlaced: false
-            };
-          });
-  
-        // Insert data
-        const result = await CRM.insertMany(formattedData);
-        console.log(`Successfully loaded ${result.length} records`);
-      } else {
-        console.log('Database already contains data, skipping initial load');
-      }
-    } catch (error) {
-      console.error('Error loading initial data:', error);
-    }
-  }
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
+// Initialize and start server
+async function startServer() {
+  await initializeCouchbase();
+  app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
+}
+
+startServer().catch(console.error);

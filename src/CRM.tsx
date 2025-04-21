@@ -377,21 +377,34 @@ export default function CRM(): JSX.Element {
   const handleMarkConsumed = async (id: string) => {
     try {
       console.log('Marking as consumed:', id);
+      // Find the CRM entry using the provided id
+      const crmToUpdate = crmData.find(item => item.id === id);
+      
+      if (!crmToUpdate) {
+        console.error('CRM not found:', id);
+        throw new Error('CRM not found');
+      }
+  
+      console.log('Found CRM:', crmToUpdate);
+  
       const response = await fetch(`${API_URL}/crm/${id}/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ status: 'consumed' })
+        body: JSON.stringify({
+          status: 'consumed',
+          labCode: crmToUpdate.labCode // Include labCode in the request
+        })
       });
   
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Error data:', errorData);
-        throw new Error(errorData.message || `Failed to update status (${response.status})`);
+        const errorData = await response.text();
+        console.error('Server response:', errorData);
+        throw new Error(`Failed to update status: ${response.status}`);
       }
   
-      // Update local state directly instead of waiting for response
+      // Update local state
       setCrmData(prevData => 
         prevData.map(item => 
           item.id === id ? { ...item, status: 'consumed' } : item

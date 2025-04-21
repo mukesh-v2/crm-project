@@ -6,5 +6,11 @@ services:
     buildCommand: npm install
     startCommand: node server.js
     envVars:
-      - key: MONGODB_URI
-        sync: false
+      - key: COUCHBASE_CONN_STR
+        value: couchbases://cb.ikgtzjgatttqqvi.cloud.couchbase.com
+      - key: COUCHBASE_USERNAME
+        value: EnvirocareLabs25
+      - key: COUCHBASE_PASSWORD
+        value: Envirocare@2025
+      - key: COUCHBASE_BUCKET
+        value: crm-db
