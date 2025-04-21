@@ -1,0 +1,48 @@
+/* Status badges */
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-weight: 500;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.status-badge.expired {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.status-badge.active {
+  background-color: #dcfce7;
+  color: #16a34a;
+}
+
+.status-badge.consumed {
+  background-color: #f3f4f6;
+  color: #4b5563;
+}
+
+.expiry-status {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 500;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.expiry-status.expired {
+  background-color: #fee2e2;
+  color: #dc2626;
+  animation: blink 2s ease-in-out infinite;
+}
+
+.expiry-status.expiring {
+  background-color: #fef9c3;
+  color: #ca8a04;
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}

@@ -1,12 +1,15 @@
 import React from 'react';
-import CRMManager from './CRM';
+import CRM from './CRM';
 import "./globals.css";
+import ErrorBoundary from './components/ErrorBoundary';
 
 const App: React.FC = () => {
   return (
-    <div className="min-h-screen bg-gray-100">
-      <CRMManager />
-    </div>
+    <ErrorBoundary>
+     <div className="min-h-screen bg-gray-100">
+       <CRM />
+     </div>
+     </ErrorBoundary>
   );
 };
 

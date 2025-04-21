@@ -1,0 +1,24 @@
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.blink-red {
+  color: #ef4444;
+  animation: blink 1.5s linear infinite;
+}
+
+.status-expired {
+  background-color: #fee2e2;
+  color: #ef4444;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+}
+
+.status-active {
+  background-color: #dcfce7;
+  color: #166534;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+}
